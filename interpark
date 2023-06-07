@@ -1,0 +1,350 @@
+# coding = utf-8
+import random
+import threading
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import Select
+
+from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import StaleElementReferenceException, \
+    JavascriptException, NoAlertPresentException, TimeoutException
+
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+
+import re
+import numpy
+import time
+import os
+import sys
+import cv2 as cv
+from pytesseract import image_to_string
+
+# image_to_string.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract'
+
+
+import warnings
+from win11toast import ToastNotification
+import logging
+
+
+class TicketMacro(threading.Thread):
+    def __init__(self, date):
+        super().__init__()
+
+        self.ID = "sngmo"
+        self.PW = "knitec78!!"
+        self.birthday = "YYMMDD"
+        self.book_code = '23007269'
+
+        self.max_seat = 0
+        self.seat_cnt = 0
+        self.ticketing_date = date
+        self.select_value = '001' if self.ticketing_date == 1 else '002'
+
+        self.start_select_seat = False
+        self.end_flag = False
+        
+        # self.toaster = ToastNotification()
+
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
+        self.formatter = logging.Formatter(u'%(asctime)s [%(filename)s:%(lineno)d] %(message)s')
+
+        self.streamingHandler = logging.StreamHandler()
+        self.streamingHandler.setFormatter(self.formatter)
+        self.logger.addHandler(self.streamingHandler)
+
+        self.opt = webdriver.ChromeOptions()
+        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.opt)
+        self.driver.maximize_window()
+        self.wait = WebDriverWait(self.driver, 3)
+        self.url = "https://ticket.interpark.com/Gate/TPLogin.asp"
+
+    def login(self):
+        
+        # seleninum 4.x 기준
+        iframe = self.driver.find_element(By.TAG_NAME,'iframe')
+        self.driver.switch_to.frame(iframe)
+        self.driver.find_element(By.NAME, 'userId').send_keys(self.ID)
+        self.driver.find_element(By.ID, 'userPwd').send_keys(self.PW)
+        self.driver.find_element(By.ID, 'btn_login').click()
+        
+        # seleninum 3.x 기준
+        # self.driver.switch_to.frame(self.driver.find_element_by_tag_name('iframe'))
+        # self.driver.find_element_by_name('userId').send_keys(self.ID)
+        # self.driver.find_element_by_id('userPwd').send_keys(self.PW)
+        # self.driver.find_element_by_id('btn_login').click()
+
+    def enter_book_link(self):
+        self.driver.get('http://poticket.interpark.com/Book/BookSession.asp?GroupCode=' + self.book_code)
+
+    def select_date(self):
+        try:
+            # self.driver.switch_to.frame(self.driver.find_element_by_id('ifrmBookStep'))
+            
+            self.driver.switch_to.frame(self.driver.find_element(By.ID, 'ifrmBookStep'))
+            # //*[@id="productSide"]/div/div[1]/div[1]/div[2]/div/div/div/div/ul[3]/li[9]
+            # //*[@id="productSide"]/div/div[1]/div[1]/div[2]/div/div/div/div/ul[3]/li[7]
+            # //*[@id="productSide"]/div/div[1]/div[1]/div[2]/div/div/div/div/ul[3]/li[8]
+            
+            try:
+                # self.driver.find_element_by_xpath(
+                #     '(//*[@id="CellPlayDate"])[' + str(self.ticketing_date) + ']').click()
+                self.driver.find_element(By.XPATH,
+                    '//*[@id="productSide"]/div/div[1]/div[1]/div[2]/div/div/div/div/ul[3]/li[' + str(self.ticketing_date) + ']').click()
+            except NoSuchElementException:
+                self.enter_book_link()
+        except NoSuchElementException:
+            self.enter_book_link()
+        
+        # 예매하기 클릭
+        self.wait.until(EC.element_to_be_clickable(
+            (By.XPATH, '//*[@id="productSide"]/div/div[2]/a[1]/span'))).click()
+
+        # 예매하기 눌러서 새창이 뜨면 포커스를 새창으로 변경
+        self.driver.switch_to.window(self.driver.window_handles[1])
+        self.driver.get_window_position(self.driver.window_handles[1])
+
+        # 남은 좌석이 있는지 확인
+        # last_seat = self.driver.find_elements_by_class_name("lv_det")
+        last_seat = self.driver.find_elements(By.CLASS_NAME,"lv_det")
+        
+        for i in last_seat:
+            numbers = re.sub(r'[^0-9]', '', i.text)
+            if int(numbers) >= self.max_seat:
+                self.driver.switch_to.default_content()
+                # self.driver.find_element_by_id('LargeNextBtnImage').click()
+                self.driver.find_element(By.ID, 'LargeNextBtnImage').click()
+                break
+
+    def captcha(self):
+        def task():
+            # 캡챠가 다시 생겼을 때 자동으로 해결
+            while True:
+                time.sleep(3)
+                try:
+                    if self.driver.find_element(By.XPATH,
+                            '//*[@id="divRecaptcha"]/div[1]/div[3]/div').is_displayed() == 1:
+                        # 캡챠 등장
+                        self.start_select_seat = False
+                        self.driver.execute_script('fnCapchaRefresh()')
+                        self.captcha()
+                    # self.wait = WebDriverWait(self.driver, 0)
+                except (StaleElementReferenceException, NoSuchElementException):
+                    time.sleep(3)
+                    continue
+
+        self.driver.switch_to.default_content()
+        seat1_frame = self.driver.find_element(By.ID, "ifrmSeat")
+        self.driver.switch_to.frame(seat1_frame)
+
+        while True:
+            try:
+                image = self.driver.find_element(By.ID, 'imgCaptcha')
+                image = image.screenshot_as_png
+            except (StaleElementReferenceException, NoSuchElementException):
+                pass
+            else:
+                break
+
+        with open(os.getcwd() + "\\captcha.png", "wb") as file:
+            file.write(image)
+        image = cv.imread(os.getcwd() + "\\captcha.png")
+
+        # Set a threshold value for the image, and save
+        image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+        image = cv.adaptiveThreshold(image, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 91, 1)
+        kernel = cv.getStructuringElement(cv.MORPH_RECT, (3, 3))
+        image = cv.morphologyEx(image, cv.MORPH_OPEN, kernel, iterations=1)
+
+        cnts = cv.findContours(image, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+        cnts = cnts[0] if len(cnts) == 2 else cnts[1]
+        for c in cnts:
+            area = cv.contourArea(c)
+            if area < 50:
+                cv.drawContours(image, [c], -1, (0, 0, 0), -1)
+        kernel2 = numpy.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+        image = cv.filter2D(image, -1, kernel2)
+        result = 255 - image
+        captcha_text = image_to_string(result)
+        self.logger.debug(f"캡챠 텍스트 : {captcha_text}")
+
+        self.driver.switch_to.default_content()
+        self.driver.switch_to.frame(seat1_frame)
+        self.driver.find_element(By.CLASS_NAME, 'validationTxt').click()
+        self.driver.find_element(By.ID, 'txtCaptcha').send_keys(captcha_text)
+
+        # 캡챠에 성공하면 divRecaptcha div의 display 속성이 none이 됨
+        if self.driver.find_element(By.XPATH, '//*[@id="divRecaptcha"]/div[1]/div[3]/div').is_displayed() == 1:
+            self.driver.execute_script('fnCapchaRefresh()')
+            self.captcha()
+        else:
+            capt_thread = threading.Thread(target=task)
+            capt_thread.start()
+
+            self.start_select_seat = True
+
+    def select_seat(self):
+        time.sleep(0.5)
+
+        self.driver.switch_to.default_content()
+        self.driver.switch_to.frame(self.driver.find_element(By.NAME, "ifrmSeat"))
+
+        # 스탠딩석 예매
+        for seat_type in range(0, 2):
+            # if valid_seat_list[seat_type]:
+
+            try:
+                self.driver.execute_script("fnSwapGrade('" + str(seat_type + 1) + "')")
+            except JavascriptException:
+                self.logger.debug("[JavascriptException] : 잠시 대기 후 실행")
+                time.sleep(0.3)
+                self.driver.execute_script("fnSwapGrade('" + str(seat_type + 1) + "')")
+                # continue
+
+            time.sleep(0.3)
+            box = self.driver.find_element(By.CSS_SELECTOR, 'td[seatgrade="' + str(seat_type + 1) + '"]')
+            try:
+                for seat_detail in box.find_elements(By.TAG_NAME, 'li'):
+                    # self.logger.debug(f"seat detail 탐색 : {seat_detail.text}")
+                    if seat_detail.text == "":
+                        continue
+                    if int(re.sub(r'[^0-9]', '', seat_detail.text.split()[1])) <= 0:
+                        continue
+                    else:
+                        self.logger.debug(f"취소표 발견 : {seat_detail.text}")
+
+                    area = re.sub(r'[^0-9]', '', seat_detail.text.split()[0])
+                    self.driver.execute_script("fnBlockSeatUpdate('', '', '{0}')".format(area))
+                    time.sleep(0.3)
+
+                    try:
+                        self.driver.switch_to.frame(self.driver.find_element(By.NAME, "ifrmSeatDetail"))
+
+                        try:
+                            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'SeatN')))
+                        except TimeoutException:
+                            self.logger.debug("이미 선점된 좌석입니다")
+
+                            self.driver.switch_to.default_content()
+                            self.driver.switch_to.frame(self.driver.find_element(By.NAME, "ifrmSeat"))
+
+                            time.sleep(0.3)
+                            continue
+
+                        seats = self.driver.find_elements(By.CLASS_NAME, 'SeatN')
+
+                        for seat in seats:
+                            seat.click()
+                            self.seat_cnt += 1
+                            self.logger.debug(f"좌석 선택!!! {self.seat_cnt}개")
+
+                        if self.seat_cnt >= 1:
+                            self.driver.switch_to.default_content()
+                            self.driver.switch_to.frame(self.driver.find_element(By.NAME, "ifrmSeat"))
+                            self.driver.find_element(By.ID, "NextStepImage").click()
+
+                            self.logger.debug("좌석 선택 완료")
+                            # self.toaster.show_toast(f"좌석 {self.seat_cnt}개 선택 완료 ", "결제가 필요합니다",
+                            #                        icon_path=None, duration=10, threaded=True)
+                            time.sleep(1)
+
+                            self.payment()
+                        else:
+                            self.logger.debug(f"좌석 선택 실패")
+                    except NoSuchElementException:
+                        self.logger.debug("[NoSuchElementException]")
+
+                        self.driver.switch_to.default_content()
+                        self.driver.switch_to.frame(self.driver.find_element(By.NAME, "ifrmSeat"))
+
+                        continue
+
+                    time.sleep(0.3)
+            except NoAlertPresentException:
+                pass
+
+    def payment(self):
+        def kakao():
+            self.driver.switch_to.frame(self.driver.find_element(By.XPATH, '//*[@id="ifrmBookStep"]'))
+            self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="Payment_22084"]/td/input'))).click()
+            self.driver.switch_to.default_content()
+            self.driver.find_element(By.XPATH, '//*[@id="SmallNextBtnImage"]').click()
+            self.driver.switch_to.frame(self.driver.find_element_by_xpath('//*[@id="ifrmBookStep"]'))
+            self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="checkAll"]'))).click()
+            self.driver.switch_to.default_content()
+            self.driver.find_element(By.XPATH, '//*[@id="LargeNextBtnImage"]').click()
+
+        self.driver.switch_to.default_content()
+        self.driver.switch_to.frame(self.driver.find_element(By.XPATH, '//*[@id="ifrmBookStep"]'))
+
+        select = Select(self.driver.find_element(By.CSS_SELECTOR, 'select[pricegradename="일반"]'))
+        select.select_by_value(str(self.seat_cnt))
+
+        self.driver.switch_to.default_content()
+        self.driver.find_element(By.XPATH, '//*[@id="SmallNextBtnImage"]').click()
+        self.driver.switch_to.frame(self.driver.find_element(By.XPATH, '//*[@id="ifrmBookStep"]'))
+
+        self.wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="YYMMDD"]'))).send_keys(self.birthday)
+        self.driver.switch_to.default_content()
+        self.driver.find_element(By.XPATH, '//*[@id="SmallNextBtnImage"]').click()
+        kakao()
+
+        self.logger.debug("티켓 예매 및 결제 완료!!!")
+        self.logger.debug("프로그램을 종료합니다")
+
+        self.end_flag = True
+
+    def run(self) -> None:
+        self.logger.debug("매크로 시작")
+
+        self.driver.get(self.url)
+        self.login()
+
+        self.enter_book_link()
+        self.select_date()
+
+        # self.captcha()
+
+        # 캡챠 끝날 때까지 대기
+        while self.start_select_seat is not True:
+            pass
+        
+        while self.end_flag is False:
+            if self.start_select_seat is not True:
+                continue
+
+            self.select_seat()
+
+            try:
+                self.driver.switch_to.default_content()
+                self.driver.switch_to.frame(self.driver.find_element(By.NAME, "ifrmSeat"))
+
+                select = Select(self.driver.find_element(By.XPATH, '//*[@id="PlaySeq"]'))
+                select.select_by_visible_text('선택하세요!')
+
+                # 캡챠 방지 위한 딜레이
+                time.sleep(0.5 + random.uniform(0.5, 1))
+
+                select.select_by_value('001' if self.ticketing_date == 1 else '002')
+            except NoSuchElementException:
+                # self.logger.debug("[captcha]에서 NoSuchElementException 에러발생")
+                continue
+
+        while True:
+            pass
+
+
+if __name__ == "__main__":
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+    # first_date_macro = TicketMacro(int(sys.argv[1]))
+    first_date_macro = TicketMacro(1)
+    
+    first_date_macro.start()

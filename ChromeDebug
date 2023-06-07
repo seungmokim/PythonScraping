@@ -1,0 +1,35 @@
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import subprocess
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
+
+from tkinter import *
+from selenium.webdriver.common.by import By
+
+# 크롬 실행
+def execChrome():
+    subprocess.Popen(r'C:\Program Files\Google\Chrome\Application\chrome.exe --remote-debugging-port=9222 --user-data-dir="C:\chromeCookie"')
+    # url = "https://www.naver.com"
+    url = "https://ticket.interpark.com/Gate/TPLogOut.asp"
+
+    option = Options()
+    option.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=option)
+    driver.maximize_window()
+    driver.get(url)
+
+    iframe = driver.find_elements(By.TAG_NAME,'iframe')[0]
+    driver.switch_to.frame(iframe)
+    driver.find_element(By.ID, "userId").send_keys("sngmo")
+    driver.find_element(By.ID, "userPwd").send_keys("TEST")
+    driver.find_element(By.ID, "btn_login").click()
+
+# 로그인
+def click1():
+    global driver
+    driver.find_element(By.XPATH, '//*[@id="userId"]').click()  # 로그인 버튼
+    print("클릭방법1")
+
+
+execChrome()
